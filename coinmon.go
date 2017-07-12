@@ -3,14 +3,22 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/bluele/slack"
 	"log"
 	"net/http"
 	"time"
 )
 
-const (
-	apiDomain string = "https://min-api.cryptocompare.com"
+var ccApiDomain string = "https://min-api.cryptocompare.com"
+
+var (
+	slackToken string = ""
+	slackApi          = slack.New(slackToken)
 )
+
+var httpClient = http.Client{
+	Timeout: time.Second * 10,
+}
 
 type coin struct {
 	coinType     string
@@ -18,15 +26,12 @@ type coin struct {
 	Usd          float64 `json: "USD"`
 	treshold     float64
 	pollInterval int
-}
-
-var httpClient = http.Client{
-	Timeout: time.Second * 10,
+	slackChannel string
 }
 
 func getCoinValue(c *coin) {
 
-	res, err := httpClient.Get(fmt.Sprintf("%s/data/price?fsym=%s&tsyms=EUR,USD", apiDomain, c.coinType))
+	res, err := httpClient.Get(fmt.Sprintf("%s/data/price?fsym=%s&tsyms=EUR,USD", ccApiDomain, c.coinType))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,7 +56,16 @@ func sendSlackAlert(coinCh <-chan *coin) {
 
 	for {
 		c := <-coinCh
-		log.Print(fmt.Sprintf("1 %s = %.2fEUR (%.2fUSD)", c.coinType, c.Eur, c.Usd))
+
+		if c.Eur <= c.treshold {
+
+			coinValue := fmt.Sprintf("1 %s = %.2fEUR (%.2fUSD)", c.coinType, c.Eur, c.Usd)
+			log.Print(coinValue)
+			err := slackApi.ChatPostMessage(c.slackChannel, coinValue, nil)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
 	}
 }
 
@@ -63,12 +77,14 @@ func main() {
 		"ETH": coin{
 			coinType:     "ETH",
 			treshold:     250,
-			pollInterval: 5,
+			pollInterval: 500,
+			slackChannel: "general",
 		},
 		"BTC": coin{
 			coinType:     "BTC",
 			treshold:     2500,
-			pollInterval: 2,
+			pollInterval: 200,
+			slackChannel: "general",
 		},
 	}
 
