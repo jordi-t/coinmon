@@ -3,87 +3,80 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
 )
 
 const (
-	apiDomain        string  = "https://min-api.cryptocompare.com"
-	ethAlertTreshold float64 = 200
-	btcAlertTreshold float64 = 3000
+	apiDomain string = "https://min-api.cryptocompare.com"
 )
 
-type coinValue struct {
-	coinType string
-	Eur      float64 `json: "EUR"`
-	Usd      float64 `json: "USD"`
+type coin struct {
+	coinType     string
+	Eur          float64 `json: "EUR"`
+	Usd          float64 `json: "USD"`
+	treshold     float64
+	pollInterval int
 }
 
-func getCoinValue(coinCh chan<- *coinValue, c coinValue) {
+var httpClient = http.Client{
+	Timeout: time.Second * 10,
+}
 
-	coinClient := http.Client{
-		Timeout: time.Second * 10,
+func getCoinValue(c *coin) {
+
+	res, err := httpClient.Get(fmt.Sprintf("%s/data/price?fsym=%s&tsyms=EUR,USD", apiDomain, c.coinType))
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer res.Body.Close()
+	d := json.NewDecoder(res.Body)
+	err = d.Decode(&c)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func pollCoinValue(coinCh chan<- *coin, c coin) {
 
 	for {
-
-		res, getErr := coinClient.Get(fmt.Sprintf("%s/data/price?fsym=%s&tsyms=EUR,USD", apiDomain, c.coinType))
-		if getErr != nil {
-			log.Fatal(getErr)
-		}
-
-		body, readErr := ioutil.ReadAll(res.Body)
-		if readErr != nil {
-			log.Fatal(readErr)
-		}
-
-		// ??? use defer here ???
-		defer res.Body.Close()
-
-		//coinValue := coinValue{}
-
-		jsonErr := json.Unmarshal(body, &c)
-		if jsonErr != nil {
-			log.Fatal(jsonErr)
-		}
-
+		getCoinValue(&c)
 		coinCh <- &c
-
-		time.Sleep(5 * time.Second)
-
+		time.Sleep(time.Duration(c.pollInterval) * time.Second)
 	}
 }
 
-func sendSlackAlert(ethCh <-chan *coinValue, btcCh <-chan *coinValue) {
+func sendSlackAlert(coinCh <-chan *coin) {
 
 	for {
-		select {
-
-		case ethValue := <-ethCh:
-			log.Print("@ETH chan")
-			if ethValue.Eur <= ethAlertTreshold {
-				log.Print(fmt.Sprintf("1 ETH = %.2fEUR (%.2fUSD)", ethValue.Eur, ethValue.Usd))
-			}
-
-		case btcValue := <-btcCh:
-			log.Print("@BTC chan")
-			if btcValue.Eur <= btcAlertTreshold {
-				log.Print(fmt.Sprintf("1 BTC = %.2fEUR (%.2fUSD)", btcValue.Eur, btcValue.Usd))
-			}
-		}
+		c := <-coinCh
+		log.Print(fmt.Sprintf("1 %s = %.2fEUR (%.2fUSD)", c.coinType, c.Eur, c.Usd))
 	}
 }
 
 func main() {
 
-	ethCh := make(chan *coinValue)
-	btcCh := make(chan *coinValue)
+	coinCh := make(chan *coin)
 
-	go sendSlackAlert(ethCh, btcCh)
-	go getCoinValue(ethCh, coinValue{coinType: "ETH"})
-	go getCoinValue(btcCh, coinValue{coinType: "BTC"})
+	coins := map[string]coin{
+		"ETH": coin{
+			coinType:     "ETH",
+			treshold:     250,
+			pollInterval: 5,
+		},
+		"BTC": coin{
+			coinType:     "BTC",
+			treshold:     2500,
+			pollInterval: 2,
+		},
+	}
+
+	go sendSlackAlert(coinCh)
+
+	for _, coin := range coins {
+		go pollCoinValue(coinCh, coin)
+	}
 
 	fmt.Println("\nDuring execution, press any key to close\n")
 	var input string
