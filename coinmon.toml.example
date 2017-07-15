@@ -1,0 +1,20 @@
+ccApiDomain = "https://min-api.cryptocompare.com"
+slackToken = ""
+serverPort = 8080
+
+[coins]
+
+    # for available currency/symbols, see https://www.cryptocompare.com/coins/
+    # pollInterval is in seconds
+
+    [coins.ethereum]
+    symbol = "ETH"
+    treshold = 200.00
+    pollInterval = 600
+    slackChannel = "general"
+
+    [coins.bitcoin]
+    symbol = "BTC"
+    treshold = 2000.00
+    pollInterval = 600
+    slackChannel = "general"
